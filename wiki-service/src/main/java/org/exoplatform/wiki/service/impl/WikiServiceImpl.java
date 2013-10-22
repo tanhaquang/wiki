@@ -97,8 +97,6 @@ import org.exoplatform.wiki.utils.Utils;
 import org.picocontainer.Startable;
 import org.xwiki.rendering.syntax.Syntax;
 
-import com.sun.org.apache.xerces.internal.util.URI.MalformedURIException;
-
 public class WikiServiceImpl implements WikiService, Startable {
 
   private static final String UNTITLED_PREFIX = "Untitled_";
@@ -272,12 +270,20 @@ public class WikiServiceImpl implements WikiService, Startable {
       LinkRegistry linkRegistry = wiki.getLinkRegistry();
       if (linkRegistry.getLinkEntries().get(getLinkEntryName(wikiType, wikiOwner, pageId)) != null) {
         linkRegistry.getLinkEntries().get(getLinkEntryName(wikiType, wikiOwner, pageId)).setNewLink(null);
+      }     
+      // Post delete activity for all children pages
+      Queue<PageImpl> queue = new LinkedList<PageImpl>();
+      queue.add(page);
+      PageImpl tempPage = null;
+      while(!queue.isEmpty()) {
+        tempPage = queue.poll();
+        postDeletePage(wikiType, wikiOwner, tempPage.getName(), tempPage);
+        Iterator<PageImpl> iter = tempPage.getChildPages().values().iterator();
+        while(iter.hasNext()) {
+          queue.add(iter.next());
+        }
       }
-      
       session.save();
-      
-      // Post activity
-      postDeletePage(wikiType, wikiOwner, pageId, page);
     } catch (Exception e) {
       log.error("Can't delete page '" + pageId + "' ", e) ;
       return false;
@@ -402,6 +408,29 @@ public class WikiServiceImpl implements WikiService, Startable {
       WikiImpl destWiki = (WikiImpl) destPage.getWiki();
       movePage.setParentPage(destPage);
       movePage.setMinorEdit(false);
+      
+      // Update permission if moving page to other space or other wiki
+      HashMap<String, String[]> pagePermission = (HashMap<String, String[]>)movePage.getPermission();
+      if (PortalConfig.GROUP_TYPE.equals(currentLocationParams.getType()) 
+          && (!currentLocationParams.getOwner().equals(newLocationParams.getOwner())
+              || !PortalConfig.GROUP_TYPE.equals(newLocationParams.getType()))) {
+        // Remove old space permission first
+        Iterator<Entry<String, String[]>> pagePermissionIterator = pagePermission.entrySet().iterator();
+        while (pagePermissionIterator.hasNext()) {
+          Entry<String, String[]> permissionEntry = pagePermissionIterator.next();
+          if (StringUtils.substringAfter(permissionEntry.getKey(), ":").equals(currentLocationParams.getOwner())) {
+            pagePermissionIterator.remove();
+          }
+        }
+      }
+      
+      // Update permission by inherit from parent
+      HashMap<String, String[]> parentPermissions = (HashMap<String, String[]>)destPage.getPermission();
+      pagePermission.putAll(parentPermissions);
+      
+      // Set permission to page
+      movePage.setPermission(pagePermission);
+      
       session.save();
       
       //update LinkRegistry
@@ -423,9 +452,6 @@ public class WikiServiceImpl implements WikiService, Startable {
           processCircularRename(entry, newEntry);
         }
       }
-      
-      // Post activity
-      postUpdatePage(newLocationParams.getType(), newLocationParams.getOwner(), movePage.getName(), movePage, PageWikiListener.MOVE_PAGE_TYPE);
     } catch (Exception e) {
       log.error("Can't move page '" + currentLocationParams.getPageId() + "' ", e);
       return false;
