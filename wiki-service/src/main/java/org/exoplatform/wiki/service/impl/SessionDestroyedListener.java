@@ -24,6 +24,7 @@ import org.exoplatform.services.listener.Event;
 import org.exoplatform.services.listener.Listener;
 import org.exoplatform.services.log.ExoLogger;
 import org.exoplatform.services.log.Log;
+import org.exoplatform.services.security.ConversationState;
 import org.exoplatform.wiki.service.WikiService;
 
 public class SessionDestroyedListener extends Listener<PortalContainer, HttpSessionEvent> {
